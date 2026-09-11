@@ -69,11 +69,36 @@ function update_script() {
     $STD git -C /opt/browserless/ reset --hard origin/main
     $STD npm update --prefix /opt/browserless
     $STD npm ci --include=optional --include=dev --prefix /opt/browserless
-    $STD /opt/browserless/node_modules/playwright-core/cli.js install --with-deps
-    # Update Chrome separately, as it has to be done with the force option. Otherwise the installation of other browsers will not be done if Chrome is already installed.
-    $STD /opt/browserless/node_modules/playwright-core/cli.js install --force chrome
-    $STD /opt/browserless/node_modules/playwright-core/cli.js install --force msedge
-    $STD /opt/browserless/node_modules/playwright-core/cli.js install chromium firefox webkit
+    export PLAYWRIGHT_BROWSERS_PATH="/opt/browserless/ms-playwright"
+    export PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT="600000"
+    PLAYWRIGHT_CLI="/opt/browserless/node_modules/playwright-core/cli.js"
+    mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
+
+    install_playwright_browser() {
+      local browser="$1"
+      shift
+      local attempt
+      for attempt in $(seq 1 3); do
+        msg_info "Installing Playwright browser: ${browser} (attempt ${attempt}/3)"
+        if $STD timeout 600 env \
+          PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" \
+          PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT="$PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT" \
+          "$PLAYWRIGHT_CLI" install "$@" "$browser"; then
+          msg_ok "Installed Playwright browser: ${browser}"
+          return 0
+        fi
+        [[ $attempt -lt 3 ]] && msg_warn "Playwright ${browser} install attempt ${attempt}/3 failed, retrying in 10 seconds..." && sleep 10
+      done
+      msg_error "Failed to install Playwright browser: ${browser}"
+      return 1
+    }
+
+    install_playwright_browser chromium --with-deps
+    install_playwright_browser firefox
+    install_playwright_browser webkit
+    # Update Chrome separately, as it has to be done with the force option.
+    install_playwright_browser chrome --force
+    install_playwright_browser msedge --force
     $STD npm install --prefix /opt/browserless esbuild typescript ts-node @types/node --save-dev
     $STD npm run build --prefix /opt/browserless
     $STD npm run build:function --prefix /opt/browserless
